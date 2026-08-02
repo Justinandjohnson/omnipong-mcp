@@ -1,64 +1,73 @@
 # omnipong-mcp
 
-MCP server (MCP SDK 2.0, Scrapling scraper) that lets any agent query omnipong.com tournament data without visiting the site. On-demand fetches cache for 15 min in `cache.db` (SQLite); a daily launchd job re-scrapes everything so the full snapshot is never more than a day old.
+Ask your agent about US table tennis tournaments instead of browsing omnipong.com.
+
+> "Any new tournaments open for signup in California?"
+> "What leagues are accepting entries?"
+> "Who won tournament 1277?"
+
+An MCP server that reads [omnipong.com](https://www.omnipong.com/) — tournaments, leagues, and camps you can sign up for. Works with Claude Code, Claude Desktop, or anything else that speaks MCP.
+
+## Install
+
+Needs [uv](https://docs.astral.sh/uv/getting-started/installation/). Nothing else — deps install on first run.
+
+```bash
+git clone https://github.com/YOURNAME/omnipong-mcp && cd omnipong-mcp
+claude mcp add omnipong -- uv run "$PWD/server.py"
+```
+
+Claude Desktop instead? Add to `claude_desktop_config.json`:
+
+```json
+{"mcpServers": {"omnipong": {"command": "uv", "args": ["run", "/full/path/to/server.py"]}}}
+```
+
+That's it. Ask your agent about tournaments.
 
 ## Tools
 
 | Tool | What it returns |
 |------|-----------------|
-| `whats_new(days, open_only, state, event_type)` | **The point of this server** — events that first appeared in the last N days and are accepting entries. |
-| `list_tournaments(state, keyword, year, event_type)` | All listed events: id, name, city, date, status (Enter/Closed/Results/Info/Draws), contact, USATT level, entry-form PDF. `event_type` is `tournaments` (148), `leagues` (74), `camps` (12), or `international`. `year` accepts `2025`, `TWeek`, `All`, etc. |
-| `get_results(tournament_id)` | Event placements for finished tournaments |
-| `get_tournament_info(tournament_id)` | Official name, date, entry status, entry-form PDF (this page is prose, not a table) |
+| `whats_new(days, open_only, state, event_type)` | **The point of this** — events that showed up in the last N days and are accepting entries |
+| `list_tournaments(state, keyword, year, event_type)` | Every listed event: name, city, date, status, contact, USATT level, entry-form PDF. `event_type` is `tournaments` (148), `leagues` (74), `camps` (12), or `international`. `year` accepts `2025`, `TWeek`, `All`, etc. |
+| `get_results(tournament_id)` | Placements for a finished tournament |
+| `get_tournament_info(tournament_id)` | Official name, date, entry status, entry form |
 
-**Scope: no player data, ever.** Player rosters and per-player pages are deliberately not scraped — for player or rating questions, point people at the site. This server exists to catch new signup-able events.
+**No player data, ever.** Rosters and per-player pages are deliberately not scraped. For player or rating questions, go to the site. This exists to catch new signup-able events.
 
-Site navigation notes — URL/parameter map and the traps that cost debug cycles — live in the `omnipong` skill at `~/.claude/skills/omnipong/SKILL.md`.
+## New-event radar
 
-## Use from Claude Code (stdio)
-
-```bash
-claude mcp add omnipong -- uv run ./server.py
-```
-
-## Run as a shared API (for other people's agents)
-
-```bash
-uv run server.py --http
-```
-
-Serves streamable-HTTP MCP at `http://<your-host>:8722/mcp`. Anyone's agent connects with:
-
-```bash
-claude mcp add --transport http omnipong http://<your-host>:8722/mcp
-```
-
-## Refresh
-
-Scheduling is external — call this once a day from your own scheduler:
+`whats_new` needs history to compare against, so run a refresh on a schedule (cron, launchd, whatever you use):
 
 ```bash
 cd /path/to/omnipong-mcp && uv run server.py --refresh
 ```
 
-It re-scrapes every listing plus results/info into `cache.db`, prints any `NEW [...]` events, and writes that day's batch. Takes ~13 min for 238 pages. Exits non-zero on failure.
+First run seeds a baseline silently and flags nothing. Every run after prints `NEW [...]` lines for events that just appeared, and writes `batches/<date>.json` — a full snapshot of every event.
 
-Why daily and not every 2–3 days — measured, not guessed (Last-Modified headers of all 292 entry-form PDFs, Aug 2026):
+**Daily, not weekly** — measured, not guessed (`Last-Modified` on all 292 entry-form PDFs, Aug 2026): new tournaments post every day of the week (Wed 59, Mon 53, Tue 47, Thu 46, Fri 38, Sat 33, Sun 16), and 86% of events end Sat/Sun so results land early week. A 2–3 day gap misses fresh postings and entry deadlines.
 
-- New tournaments are posted **every day of the week**: Wed 59, Mon 53, Tue 47, Thu 46, Fri 38, Sat 33, Sun 16. A 2–3 day gap always misses fresh postings and entry-deadline changes.
-- 86% of events end Sat/Sun, so results land early week; a daily pull picks them up at most 24 h late.
+Takes ~13 min for 238 pages. Exits non-zero on failure.
 
-## Batches
+## Everyone runs their own copy
 
-Each refresh run also writes `batches/<YYYY-MM-DD>.json` — one self-contained file with every tournament plus its full player list and results/info. Build one manually from the current snapshot with `uv run server.py --export`.
+There's no shared public server on purpose. Each install caches to its own `cache.db` and hits omnipong from its own machine — nobody's traffic pools onto one IP and gets that small volunteer-run site blocked.
 
-Batch #1 (`batches/2026-08-01.json`, 2.25 MB): 148 tournaments, 24 state/series sections, 8,129 player entries, 114 info pages with date + entry status.
+`server.py --http` exists for serving your own agents on your own network. It has no auth and binds `0.0.0.0:8722` — don't put it on the public internet.
 
-Reading empties correctly: 36 tournaments have no players and 21 finished ones have no placements — that is the site's own state, not a scrape failure. When omnipong says so explicitly the message is preserved in the `note` field (e.g. "There are no players to list at this time"); results pages just render a header-only table. Zero empties in batch #1 were unexplained.
+## Be polite
+
+Cache is 15 min; refresh sleeps 0.2s between pages. Don't parallelize this. Omnipong is run by volunteers.
 
 ## Test
 
 ```bash
-uv run test_smoke.py                                  # real MCP client over stdio, live site
-OMNIPONG_REFRESH_LIMIT=3 uv run server.py --refresh   # small real refresh run
+uv run test_smoke.py
 ```
+
+Real MCP client, real stdio, live site, no mocks. Checks all four tools and asserts completeness (45 CA tournaments, 74 leagues, 12 camps, 148 national rows across 24 sections, known-good results for id 1277).
+
+Site notes — URL map, page structures, and seven traps that each cost a debug cycle — are in [SKILL.md](SKILL.md). Read it before touching the scraper. Drop it in `~/.claude/skills/omnipong/` to load it as an agent skill.
+
+MIT.
