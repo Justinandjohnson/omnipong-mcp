@@ -65,11 +65,48 @@ Cache is 15 min; refresh sleeps 0.2s between pages. Don't parallelize this. Omni
 ```bash
 uv run test_smoke.py         # happy path: all four tools against the live site
 uv run test_adversarial.py server.py   # hostile input, injection, concurrency
+uv run audit.py              # are the selectors still reading the site correctly?
+uv run test_audit.py         # does the audit actually catch a broken parser?
 ```
 
 Real MCP client, real stdio, live site, no mocks. The smoke test asserts completeness (45 CA tournaments, 74 leagues, 12 camps, 148 national rows across 24 sections, known-good results for id 1277). The adversarial suite covers garbage enums, junk and out-of-range IDs, SQL-injection payloads, 5k-char unicode, path traversal, absurd day counts, and 8 concurrent callers — and asserts errors are *actionable*, not leaked tracebacks.
 
-Not covered: Windows and Linux (macOS only), long-run memory/disk growth, and behavior if omnipong changes its HTML.
+## When omnipong changes its HTML
+
+The parser is fixed CSS selectors, written once. Scrapers don't break loudly — they
+break *quietly*, returning `[]` or plausible-looking garbage that your agent reports
+as fact. Two checks make that impossible to miss:
+
+**Every call self-checks.** `list_tournaments` sweeps the page a second time for event
+ids *without* using its own selectors (`table.omnipong`, `p[align]`). If that independent
+read finds events the parser didn't return, it raises instead of returning a short list.
+An empty listing is still legal — International is empty today — but silently dropping
+visible events is not.
+
+**`audit.py` catches the nastier failure.** If omnipong inserts a column, every fixed
+index shifts: city holds the date, contact holds the ball type. Row counts stay identical
+and nothing raises. So the audit compares the header row against a recorded baseline and
+validates the shape of every field — dates match `MM/DD/YY`, status is one of the known
+five, a city must not look like a date. Verified by shifting a column on a copy: 148 rows,
+headers unchanged, **11 findings, exit 1**.
+
+An audit that always prints OK is indistinguishable from one that checks nothing, so
+`test_audit.py` proves it works, reproducibly: it corrupts the parser on a throwaway copy
+in four ways omnipong could actually break it — inserted column, renamed table class,
+stricter row filter, changed detail-page markup — and asserts the audit fails each time,
+then that the real parser passes. Every mutation asserts its own target text was found, so
+a stale mutation fails loudly instead of silently testing nothing. **5/5.**
+
+Run the audit with your daily refresh:
+
+```bash
+cd /path/to/omnipong-mcp && uv run server.py --refresh && uv run audit.py
+```
+
+A failure names what changed, which is what an agent needs to re-derive the selectors —
+read [SKILL.md](SKILL.md) first, it has the page structures and seven documented traps.
+
+Not covered: Windows and Linux (macOS only), and long-run memory/disk growth.
 
 Site notes — URL map, page structures, and seven traps that each cost a debug cycle — are in [SKILL.md](SKILL.md). Read it before touching the scraper. Drop it in `~/.claude/skills/omnipong/` to load it as an agent skill.
 

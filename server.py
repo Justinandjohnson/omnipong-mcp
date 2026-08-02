@@ -76,6 +76,24 @@ def _parse_tables(page) -> dict:
     return {"title": _text(h3[0]) if h3 else "", "note": note, "tables": tables}
 
 
+_ID_RE = re.compile(r"[?&][rh]=(\d+)")
+
+
+def _generic_ids(page) -> set[int]:
+    """Every event id on the page, found WITHOUT the parser's own selectors.
+
+    Deliberately independent of `table.omnipong` and `p[align]`: it sweeps every
+    <tr> anywhere in the document. If this sees ids the parser didn't return, the
+    selectors have drifted and the parser is silently dropping real events.
+    """
+    ids = set()
+    for tr in page.css("tr"):
+        m = _ID_RE.search(" ".join(i.attrib.get("onclick", "") for i in tr.css("input")))
+        if m:
+            ids.add(int(m.group(1)))
+    return ids
+
+
 def _check_id(tournament_id: int) -> int:
     """Reject junk ids before they become requests to omnipong."""
     if not isinstance(tournament_id, int) or tournament_id <= 0:
@@ -140,12 +158,16 @@ def list_tournaments(state: str = "", keyword: str = "", year: str = "",
             if keyword and not year and keyword.lower() not in t["name"].lower():
                 continue
             out.append(t)
-    # an unfiltered listing is never empty on a working site — zero rows means the
-    # selectors stopped matching, not that omnipong has no events. fail loud.
-    if not out and not (state or keyword or year):
-        raise RuntimeError(
-            f"parser found 0 {event_type} on the unfiltered listing — omnipong's HTML "
-            f"likely changed; the CSS selectors in list_tournaments need re-deriving")
+    # Self-check against an independent read of the same page. An empty listing is
+    # legitimate (International is empty today); silently DROPPING events that are
+    # visibly on the page is not. Only meaningful unfiltered.
+    if not (state or keyword or year):
+        missed = _generic_ids(page) - {t["tournament_id"] for t in out}
+        if missed:
+            raise RuntimeError(
+                f"parser dropped {len(missed)} of {len(_generic_ids(page))} {event_type} "
+                f"visible on the page (ids {sorted(missed)[:5]}...) — omnipong's HTML "
+                f"changed; the selectors in list_tournaments need re-deriving")
     return out
 
 
