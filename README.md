@@ -63,10 +63,13 @@ Cache is 15 min; refresh sleeps 0.2s between pages. Don't parallelize this. Omni
 ## Test
 
 ```bash
-uv run test_smoke.py
+uv run test_smoke.py         # happy path: all four tools against the live site
+uv run test_adversarial.py server.py   # hostile input, injection, concurrency
 ```
 
-Real MCP client, real stdio, live site, no mocks. Checks all four tools and asserts completeness (45 CA tournaments, 74 leagues, 12 camps, 148 national rows across 24 sections, known-good results for id 1277).
+Real MCP client, real stdio, live site, no mocks. The smoke test asserts completeness (45 CA tournaments, 74 leagues, 12 camps, 148 national rows across 24 sections, known-good results for id 1277). The adversarial suite covers garbage enums, junk and out-of-range IDs, SQL-injection payloads, 5k-char unicode, path traversal, absurd day counts, and 8 concurrent callers — and asserts errors are *actionable*, not leaked tracebacks.
+
+Not covered: Windows and Linux (macOS only), long-run memory/disk growth, and behavior if omnipong changes its HTML.
 
 Site notes — URL map, page structures, and seven traps that each cost a debug cycle — are in [SKILL.md](SKILL.md). Read it before touching the scraper. Drop it in `~/.claude/skills/omnipong/` to load it as an agent skill.
 
