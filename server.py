@@ -140,6 +140,12 @@ def list_tournaments(state: str = "", keyword: str = "", year: str = "",
             if keyword and not year and keyword.lower() not in t["name"].lower():
                 continue
             out.append(t)
+    # an unfiltered listing is never empty on a working site — zero rows means the
+    # selectors stopped matching, not that omnipong has no events. fail loud.
+    if not out and not (state or keyword or year):
+        raise RuntimeError(
+            f"parser found 0 {event_type} on the unfiltered listing — omnipong's HTML "
+            f"likely changed; the CSS selectors in list_tournaments need re-deriving")
     return out
 
 
