@@ -286,6 +286,97 @@ def whats_new(days: int = 7, open_only: bool = True, state: str = "", event_type
     return [dict(zip(cols, r)) for r in rows]
 
 
+# Recorded from the live site 2026-08-01. Tournaments serves both spellings of the
+# city column; either is fine, a third is a change worth looking at.
+BASELINE_HEADERS = {
+    "tournaments": {
+        ("Action", "List", "Name - Click for entry Info", "City", "Date", "Contact",
+         "Ball Info", "USATT Level"),
+        ("Action", "List", "Name - Click for entry Info", "City, State", "Date", "Contact",
+         "Ball Info", "USATT Level"),
+    },
+    "leagues": {("Action", "List", "Name - Click for entry Info", "City", "Date", "Contact")},
+    "camps": {("Action", "List", "Name - Click for entry Info", "City", "Date", "Contact")},
+    "international": set(),  # legitimately empty today; any header here is new
+}
+STATUSES = {"Enter", "Closed", "Results", "Info", "Draws"}
+DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{2}( - \d{2}/\d{2}/\d{2})?$")
+_TYPE_PARAM = {"tournaments": 0, "leagues": 1, "camps": 2, "international": 3}
+
+
+@mcp.tool()
+def check_parser_health() -> dict:
+    """Verify this server is still reading omnipong correctly. Run before trusting
+    a surprising answer, and on a schedule.
+
+    Scrapers fail quietly: if omnipong inserts a column, every fixed index shifts and
+    the tools return confident nonsense with the row count unchanged. This compares the
+    live header rows against a recorded baseline and validates the shape of every field.
+
+    Returns {"ok": bool, "findings": [...], "report": [...]}. If ok is false, the data
+    from the other tools should not be trusted until the selectors are re-derived.
+    """
+    findings, report = [], []
+
+    def note(kind, msg):
+        findings.append({"kind": kind, "detail": msg})
+        report.append(f"  {kind}: {msg}")
+
+    for event_type in ALL_TYPES:
+        report.append(f"{event_type}:")
+        page = _fetch(f"t-tourney.asp?e={_TYPE_PARAM[event_type]}")
+        shapes = set()
+        for table in page.css("table.omnipong"):
+            rows = table.css("tr")
+            if rows:
+                shapes.add(tuple(_text(c) for c in rows[0].css("th, td")))
+        for shape in shapes - BASELINE_HEADERS[event_type]:
+            note("COLUMNS CHANGED",
+                 f"unrecognized header {shape} — every fixed column index in "
+                 f"list_tournaments may now point at the wrong field")
+        try:
+            rows = list_tournaments(event_type=event_type)
+        except RuntimeError as e:
+            note("PARSER BROKEN", str(e))
+            continue
+        report.append(f"  {len(rows)} events, {len(shapes)} header shape(s)")
+        for r in rows:
+            where = f"id={r['tournament_id']} {r['name'][:30]!r}"
+            if not isinstance(r["tournament_id"], int) or r["tournament_id"] <= 0:
+                note("BAD ID", where)
+            if not r["name"]:
+                note("EMPTY NAME", where)
+            if not DATE_RE.match(r["date"] or ""):
+                note("BAD DATE", f"{where} date={r['date']!r} (expected MM/DD/YY)")
+            if r["status"] not in STATUSES:
+                note("BAD STATUS", f"{where} status={r['status']!r} not in {sorted(STATUSES)}")
+            if DATE_RE.match(r["city"] or ""):
+                note("CITY LOOKS LIKE A DATE", f"{where} city={r['city']!r} — columns shifted")
+            if not r["state_section"]:
+                note("NO SECTION", where)
+            if r["entry_form_pdf"] and not r["entry_form_pdf"].lower().endswith(".pdf"):
+                note("BAD PDF LINK", f"{where} {r['entry_form_pdf']}")
+
+    # get_results/get_tournament_info run through _parse_tables, which nothing above
+    # touches. 1277 is a finished tournament with stable published placements.
+    report.append("detail pages (id 1277):")
+    res = get_results(1277)
+    detail = [r for t in res["tables"] for r in t]
+    if not detail:
+        note("RESULTS EMPTY", "get_results(1277) parsed no rows — results page structure changed")
+    elif not any("First Place" in r for r in detail):
+        note("RESULTS COLUMNS CHANGED", f"no 'First Place' column; got {sorted(detail[0])[:6]}")
+    else:
+        report.append(f"  {len(detail)} result rows, columns intact")
+    info = get_tournament_info(1277)
+    if not (info["tournament_name"] and info["details"]):
+        note("INFO PAGE EMPTY", f"name={info['tournament_name']!r} — h2/h3 structure changed")
+    else:
+        report.append(f"  info page: {info['tournament_name'][:40]!r}")
+
+    return {"ok": not findings, "findings": findings, "report": report}
+
+
 def export_batch() -> Path:
     """Write batches/<date>.json: every event with its results/info. No player data."""
     from datetime import date

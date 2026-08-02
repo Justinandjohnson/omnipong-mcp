@@ -6,6 +6,23 @@ An MCP server that watches omnipong.com and tells agents about **new tournaments
 
 **Scope rule:** never scrape player names, rosters, or per-player pages. For player/rating questions, point people at the site.
 
+## Parser drift is handled (2026-08-02)
+
+The parser is frozen CSS selectors, and scrapers break quietly rather than loudly.
+Three layers now make a quiet break impossible:
+
+1. `list_tournaments` re-reads each page for event ids **without** its own selectors
+   and raises if it dropped any. An empty listing stays legal (International is empty).
+2. `check_parser_health()` — an MCP tool, also `uv run audit.py` — compares live header
+   rows to a recorded baseline and validates every field's shape, catching a column
+   insert that shifts city into date while row counts stay identical.
+3. `test_audit.py` corrupts the parser four ways and asserts the audit catches each,
+   so the audit can't rot into always-OK. 5/5.
+
+Chrome/Playwright was measured and rejected: browser DOM and raw HTML are identical
+(174 rows, 26 tables, 24 `table.omnipong` both ways), so a browser adds latency and a
+failure mode without adding information.
+
 ## Status: built and verified. Not yet proven unattended.
 
 Everything below was tested against the live site through a real MCP client, not mocks.

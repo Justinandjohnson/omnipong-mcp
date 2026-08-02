@@ -18,8 +18,17 @@ async def main():
             await s.initialize()
             tools = [t.name for t in (await s.list_tools()).tools]
             print("tools:", tools)
-            assert set(tools) == {"list_tournaments", "whats_new", "get_results", "get_tournament_info"}
+            assert set(tools) == {"list_tournaments", "whats_new", "get_results",
+                                  "get_tournament_info", "check_parser_health"}
             assert "get_players" not in tools, "player scraping must stay removed"
+
+            # the health check builds a text report; if any of it leaked to stdout it
+            # would corrupt the JSON-RPC stream, so exercising it over real stdio is
+            # the only way to know the tool is safe to ship
+            r = await s.call_tool("check_parser_health", {})
+            health = json.loads(r.content[0].text)
+            print(f"parser health: ok={health['ok']}, {len(health['findings'])} findings")
+            assert health["ok"], health["findings"]
 
             r = await s.call_tool("list_tournaments", {"state": "California"})
             ca = [json.loads(c.text) for c in r.content]

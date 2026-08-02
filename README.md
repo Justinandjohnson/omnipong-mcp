@@ -33,6 +33,7 @@ That's it. Ask your agent about tournaments.
 | `list_tournaments(state, keyword, year, event_type)` | Every listed event: name, city, date, status, contact, USATT level, entry-form PDF. `event_type` is `tournaments` (148), `leagues` (74), `camps` (12), or `international`. `year` accepts `2025`, `TWeek`, `All`, etc. |
 | `get_results(tournament_id)` | Placements for a finished tournament |
 | `get_tournament_info(tournament_id)` | Official name, date, entry status, entry form |
+| `check_parser_health()` | Whether the scraper is still reading the site correctly. `{"ok": bool, "findings": [...]}` — ask for this before trusting a surprising answer |
 
 **No player data, ever.** Rosters and per-player pages are deliberately not scraped. For player or rating questions, go to the site. This exists to catch new signup-able events.
 
@@ -82,6 +83,11 @@ ids *without* using its own selectors (`table.omnipong`, `p[align]`). If that in
 read finds events the parser didn't return, it raises instead of returning a short list.
 An empty listing is still legal — International is empty today — but silently dropping
 visible events is not.
+
+**The health check is a tool, not just a script.** `check_parser_health()` is exposed
+over MCP, so your agent can verify the plumbing itself — "are you sure there are no
+tournaments in Ohio?" becomes a question it can actually answer. `audit.py` is the same
+check from the command line.
 
 **`audit.py` catches the nastier failure.** If omnipong inserts a column, every fixed
 index shifts: city holds the date, contact holds the ball type. Row counts stay identical
