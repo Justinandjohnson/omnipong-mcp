@@ -73,8 +73,8 @@ so it must not go on the public internet as-is.
 | `./cache.db` | SQLite: cached raw HTML (15-min TTL) + `seen` table = the first-seen index behind `whats_new`. |
 | `./batches/2026-08-01.json` | Batch #1 — every event with results/info, no player data. One file per day. |
 | `./refresh.log` | Output of the last refresh run, including `NEW [...]` lines. |
-| `~/.claude/skills/omnipong/SKILL.md` | Site navigation skill: URL/parameter map, 7 documented traps, scope rule. Read before touching the scraper. |
-| `~/.claude/projects/-project-/memory/omnipong-no-player-data.md` | Durable memory of the no-player-data rule. |
+| `./SKILL.md (also in ~/.claude/skills/omnipong/)` | Site navigation skill: URL/parameter map, 7 documented traps, scope rule. Read before touching the scraper. |
+| `~/.claude/.../memory/omnipong-no-player-data.md` | Durable memory of the no-player-data rule. |
 
 ## Commands
 
