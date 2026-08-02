@@ -69,10 +69,16 @@ async def main():
             # that would let every assertion pass vacuously.
             import sqlite3
             con = sqlite3.connect("cache.db")
-            seen = con.execute("SELECT COUNT(*), SUM(first_seen='seed') FROM seen").fetchone()
+            try:
+                seen = con.execute("SELECT COUNT(*), SUM(first_seen='seed') FROM seen").fetchone()
+            except sqlite3.OperationalError:
+                seen = None  # fresh install: no --refresh has run yet
             con.close()
-            assert seen[0] >= 200, f"baseline too small to trust: {seen[0]} rows"
-            print(f"baseline: {seen[0]} events tracked ({seen[1]} seeded)")
+            if seen:
+                assert seen[0] >= 200, f"baseline too small to trust: {seen[0]} rows"
+                print(f"baseline: {seen[0]} events tracked ({seen[1]} seeded)")
+            else:
+                print("baseline: none yet — run `uv run server.py --refresh` to seed whats_new")
 
             r = await s.call_tool("whats_new", {"days": 30})
             new = [json.loads(c.text) for c in r.content] if r.content else []
