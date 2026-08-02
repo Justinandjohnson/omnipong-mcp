@@ -29,8 +29,12 @@ mcp = MCPServer("omnipong")
 
 
 def _db() -> sqlite3.Connection:
-    con = sqlite3.connect(DB, timeout=30)
-    con.execute("CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY, ts REAL, body TEXT)")
+    try:
+        con = sqlite3.connect(DB, timeout=30)
+        con.execute("CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY, ts REAL, body TEXT)")
+    except sqlite3.OperationalError as e:
+        raise RuntimeError(f"cannot open cache database {DB} ({e}) — "
+                           f"the install directory must be writable") from e
     return con
 
 
@@ -72,8 +76,15 @@ def _parse_tables(page) -> dict:
     return {"title": _text(h3[0]) if h3 else "", "note": note, "tables": tables}
 
 
+def _check_id(tournament_id: int) -> int:
+    """Reject junk ids before they become requests to omnipong."""
+    if not isinstance(tournament_id, int) or tournament_id <= 0:
+        raise ValueError(f"tournament_id must be a positive integer, got {tournament_id!r}")
+    return tournament_id
+
+
 def _tournament_page(t: int, tournament_id: int) -> dict:
-    return _parse_tables(_fetch(f"T-tourney.asp?t={t}&r={tournament_id}"))
+    return _parse_tables(_fetch(f"T-tourney.asp?t={t}&r={_check_id(tournament_id)}"))
 
 
 @mcp.tool()
@@ -89,7 +100,10 @@ def list_tournaments(state: str = "", keyword: str = "", year: str = "",
     Returned tournament_id works with the other tools. status is one of
     Enter (open entry) / Closed / Results (finished) / Info / Draws.
     """
-    e = {"tournaments": 0, "leagues": 1, "camps": 2, "international": 3}[event_type]
+    types = {"tournaments": 0, "leagues": 1, "camps": 2, "international": 3}
+    if event_type not in types:
+        raise ValueError(f"event_type must be one of {sorted(types)}, got {event_type!r}")
+    e = types[event_type]
     if year:
         page = _fetch(f"T-tourney.asp?t=9&e={e}", data={"Year": year, "Keyword": keyword})
     else:
@@ -219,6 +233,7 @@ def whats_new(days: int = 7, open_only: bool = True, state: str = "", event_type
     Populated by the daily refresh; the first run seeds a baseline and flags nothing.
     """
     from datetime import date, timedelta
+    days = max(0, min(int(days), 36500))  # ponytail: 100y is past every real listing
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     q = ("SELECT event_id, event_type, first_seen, name, city, date, status, "
          "state_section, entry_form_pdf FROM seen WHERE first_seen != 'seed' AND first_seen >= ?")
