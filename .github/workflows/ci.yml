@@ -1,0 +1,31 @@
+name: cross-platform
+
+# Every job hits the live omnipong.com, which is run by volunteers. So this does NOT
+# run on every push — weekly, or when someone asks for it. Within a job the 15-min
+# HTML cache means later steps mostly reuse what the smoke test already fetched.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 11 * * 1"  # Mondays
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false  # a Windows-only break must not hide the Linux result
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      # order matters: smoke populates cache.db, so the checks after it mostly
+      # read from cache instead of re-fetching the site three more times
+      - name: smoke (all 5 tools, real stdio, live site)
+        run: uv run test_smoke.py
+      - name: audit (selectors still match the live site)
+        run: uv run audit.py
+      - name: mutation test (the audit actually catches breakage)
+        run: uv run test_audit.py
+      - name: adversarial (hostile input, injection, concurrency)
+        run: uv run test_adversarial.py server.py
