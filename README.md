@@ -112,7 +112,14 @@ cd /path/to/omnipong-mcp && uv run server.py --refresh && uv run audit.py
 A failure names what changed, which is what an agent needs to re-derive the selectors —
 read [SKILL.md](SKILL.md) first, it has the page structures and seven documented traps.
 
-Not covered: Windows and Linux (macOS only), and long-run memory/disk growth.
+## Cross-platform
+
+All four suites run on **Windows, Linux and macOS** via GitHub Actions
+([.github/workflows/ci.yml](.github/workflows/ci.yml)) — weekly and on demand, not on
+every push, because they hit the live volunteer-run site. Last run: identical results on
+all three (smoke OK, audit OK, mutation 5/5, adversarial 14/14).
+
+Not covered: long-run memory/disk growth over months of daily refreshes.
 
 Site notes — URL map, page structures, and seven traps that each cost a debug cycle — are in [SKILL.md](SKILL.md). Read it before touching the scraper. Drop it in `~/.claude/skills/omnipong/` to load it as an agent skill.
 
