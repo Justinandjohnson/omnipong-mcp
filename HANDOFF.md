@@ -30,6 +30,36 @@ Point your external scheduler at `uv run server.py --refresh` once a day. After 
 `refresh.log` for `NEW [...]` lines. A flood of "new" events means the baseline was reset without a
 full seed run — see trap #1 in the skill.
 
+## NEXT TASK: secure public deploy (designed, NOT yet built)
+
+Goal: let other people try it with zero blast radius on Jared.
+
+**The risk that drives the design:** if a stranger's agent can make the server fetch from
+omnipong.com, they can hammer that small volunteer-run site *from our IP* and get us blocked.
+Auth alone does not fix this. So:
+
+**Split it in two.**
+
+1. **Private collector** (Jared's machine / his external scheduler) — the ONLY thing that ever
+   talks to omnipong.com. Runs `--refresh` daily, produces `cache.db` + `batches/<date>.json`.
+2. **Public server** (separate host, e.g. Render free tier) — serves **read-only from a copy of
+   that data** and is hard-blocked from making any outbound request to omnipong.
+
+Implementation checklist (none done yet):
+- [ ] `--public` flag: `_fetch()` raises instead of hitting the network; cache miss = clean error,
+      never a live fetch. This is the load-bearing control — test it with the network unplugged.
+- [ ] Bearer-token auth, **one token per user** in an env var, so revoking one doesn't affect others.
+- [ ] Per-token rate limit.
+- [ ] Deploy public server on its own host — not Jared's machine, no credentials, no personal data
+      (the no-player-data rule already means there is nothing sensitive to leak).
+- [ ] Ship data by committing/uploading a snapshot, or a small pull job — never give the public
+      host scrape rights.
+- [ ] Verify from outside: no token = 401, bad token = 401, valid token = data, and confirm the
+      public host makes zero requests to omnipong under load.
+
+Do NOT expose the current `--http` mode publicly as-is: it binds `0.0.0.0:8722`, has no auth,
+and will fetch live on a cache miss.
+
 ## Possible follow-ups (none started, none required)
 
 - Push new events somewhere (Slack/email) instead of only logging them
