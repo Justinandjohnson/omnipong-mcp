@@ -13,7 +13,7 @@ An MCP server that reads [omnipong.com](https://www.omnipong.com/) — tournamen
 Needs [uv](https://docs.astral.sh/uv/getting-started/installation/). Nothing else — deps install on first run.
 
 ```bash
-git clone https://github.com/YOURNAME/omnipong-mcp && cd omnipong-mcp
+git clone https://github.com/Justinandjohnson/omnipong-mcp && cd omnipong-mcp
 claude mcp add omnipong -- uv run "$PWD/server.py"
 ```
 
