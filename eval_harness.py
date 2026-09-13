@@ -125,6 +125,23 @@ def functional_phase() -> None:
             check(r.status_code == 200 and r.json()["ok"],
                   "parser health is ok (selectors still read the live site)")
 
+            # CORS — the REST face exists to serve browser web apps on another origin
+            # (rubberr on :3001). A browser blocks the response with no ACAO header even
+            # though the GET is 200, so a missing header silently breaks every web-app
+            # caller. httpx doesn't enforce CORS, but the header is checkable directly.
+            origin = "http://localhost:3001"
+            pf = c.request("OPTIONS", "/events",
+                           headers={"Origin": origin,
+                                    "Access-Control-Request-Method": "GET"})
+            check(pf.status_code in (200, 204)
+                  and pf.headers.get("access-control-allow-origin") in ("*", origin),
+                  f"CORS preflight OPTIONS /events -> {pf.status_code}, ACAO="
+                  f"{pf.headers.get('access-control-allow-origin')!r}")
+            g = c.get("/events", params={"event_type": "tournaments"},
+                      headers={"Origin": origin})
+            check(g.headers.get("access-control-allow-origin") in ("*", origin),
+                  "GET /events carries Access-Control-Allow-Origin for a browser origin")
+
             # /events California
             r = c.get("/events", params={"state": "California"})
             ca = r.json()

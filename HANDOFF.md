@@ -76,7 +76,7 @@ default 60 / `OMNIPONG_RATE_WINDOW`, default 60s), always on, covering both face
 | `./ARCHITECTURE.md` | The hosted "one core, two faces" design, distribution plan, and what's ruled out. |
 | `./server.json` + `./PUBLISH.md` | Official MCP Registry entry (remote streamable-http) and the publish steps. |
 | `./test_smoke.py` | Real smoke test — spawns the server over stdio, hits the live site, asserts completeness. `uv run test_smoke.py` |
-| `./eval_harness.py` | Real eval of the two **hosted** faces — starts `server.py --http`, hits every REST endpoint + the MCP-over-HTTP client, checks both faces agree (one core), adversarial inputs, concurrency, and the rate-limit 429 boundary. Live site, no mocks. Last run 28/28. `uv run eval_harness.py` |
+| `./eval_harness.py` | Real eval of the two **hosted** faces — starts `server.py --http`, hits every REST endpoint + the MCP-over-HTTP client, checks both faces agree (one core), CORS headers (browser cross-origin), adversarial inputs, concurrency, and the rate-limit 429 boundary. Live site, no mocks. Last run 30/30. `uv run eval_harness.py` |
 | `./README.md` | Tool table, install commands, refresh cadence and the evidence for it. |
 | `./HANDOFF.md` | This file. |
 | `./cache.db` | SQLite: cached raw HTML (15-min TTL) + `seen` table = the first-seen index behind `whats_new`. |

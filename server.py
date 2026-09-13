@@ -525,8 +525,20 @@ if __name__ == "__main__":
         export_batch()
     elif "--http" in sys.argv:
         import uvicorn
+        from starlette.middleware.cors import CORSMiddleware
         app = mcp.streamable_http_app(host="0.0.0.0")
         app.add_middleware(RateLimitMiddleware)  # always on — see abuse protection
+        # The REST face exists to serve browser web apps (rubberr) on another origin.
+        # Read-only public JSON API, no cookies/credentials → allow any origin. Added
+        # last so it's outermost: preflight OPTIONS is answered before the rate limiter.
+        # OMNIPONG_CORS_ORIGINS (comma-separated) narrows it for a real deploy.
+        _origins = os.environ.get("OMNIPONG_CORS_ORIGINS", "*").split(",")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[o.strip() for o in _origins],
+            allow_methods=["GET", "OPTIONS"],
+            allow_headers=["*"],
+        )
         uvicorn.run(app, host="0.0.0.0", port=8722)
     else:
         mcp.run()
