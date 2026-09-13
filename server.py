@@ -398,6 +398,124 @@ def export_batch() -> Path:
     return out
 
 
+# ── REST face ──────────────────────────────────────────────────────────────
+# Second face over the SAME core (the @mcp.tool functions above). Agents use the
+# MCP face at /mcp; web apps (rubberr) use these plain-JSON GETs. One data source,
+# so the two faces can never disagree. See ARCHITECTURE.md.
+from starlette.concurrency import run_in_threadpool  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
+
+
+async def _serve(fn, *args, **kwargs) -> JSONResponse:
+    """Run a blocking core call off the event loop; turn its errors into clean
+    JSON instead of a raw traceback (a leaked traceback is a defect)."""
+    try:
+        data = await run_in_threadpool(fn, *args, **kwargs)
+    except ValueError as e:            # bad enum / bad id — caller's fault
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except RuntimeError as e:          # parser drift / omnipong HTTP error
+        return JSONResponse({"error": str(e)}, status_code=502)
+    return JSONResponse(data)
+
+
+def _int_param(request: Request, name: str) -> int:
+    """Path/query int with a clean 400 instead of a ValueError traceback."""
+    try:
+        return int(request.path_params.get(name, request.query_params.get(name, "")))
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer")
+
+
+@mcp.custom_route("/events", methods=["GET"])
+async def rest_events(request: Request) -> JSONResponse:
+    q = request.query_params
+    return await _serve(list_tournaments,
+                        state=q.get("state", ""), keyword=q.get("keyword", ""),
+                        year=q.get("year", ""),
+                        event_type=q.get("event_type", "tournaments"))
+
+
+@mcp.custom_route("/results/{tournament_id:int}", methods=["GET"])
+async def rest_results(request: Request) -> JSONResponse:
+    try:
+        tid = _int_param(request, "tournament_id")
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return await _serve(get_results, tid)
+
+
+@mcp.custom_route("/info/{tournament_id:int}", methods=["GET"])
+async def rest_info(request: Request) -> JSONResponse:
+    try:
+        tid = _int_param(request, "tournament_id")
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return await _serve(get_tournament_info, tid)
+
+
+@mcp.custom_route("/whats-new", methods=["GET"])
+async def rest_whats_new(request: Request) -> JSONResponse:
+    q = request.query_params
+    try:
+        days = int(q.get("days", "7"))
+    except ValueError:
+        return JSONResponse({"error": "days must be an integer"}, status_code=400)
+    open_only = q.get("open_only", "true").lower() not in ("false", "0", "no")
+    return await _serve(whats_new, days=days, open_only=open_only,
+                        state=q.get("state", ""), event_type=q.get("event_type", ""))
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def rest_health(request: Request) -> JSONResponse:
+    result = await run_in_threadpool(check_parser_health)
+    return JSONResponse(result, status_code=200 if result["ok"] else 503)
+
+
+# ── abuse protection ─────────────────────────────────────────────────────────
+# The face is public read-only data (no player data, nothing secret), so the real
+# risk is load/amplification, not disclosure. One protection, always on, covering
+# BOTH faces: a fixed-window per-IP rate limit. This is what makes --http safe to
+# expose. Pure-ASGI (not BaseHTTPMiddleware) so it never buffers the /mcp SSE stream.
+import threading  # noqa: E402
+from collections import defaultdict  # noqa: E402
+
+RATE_LIMIT = int(os.environ.get("OMNIPONG_RATE_LIMIT", "60"))    # requests per window
+RATE_WINDOW = int(os.environ.get("OMNIPONG_RATE_WINDOW", "60"))  # window, seconds
+_hits: dict[str, list] = defaultdict(lambda: [0.0, 0])  # ip -> [window_start, count]
+_hits_lock = threading.Lock()
+
+
+class RateLimitMiddleware:
+    """Fixed-window per-client-IP limiter. Sends its own 429 and otherwise passes
+    the request through untouched (no response buffering, so SSE keeps streaming)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        ip = scope["client"][0] if scope.get("client") else "unknown"
+        now = time.time()
+        with _hits_lock:
+            if len(_hits) > 10000:  # bound memory: drop IPs whose window has expired
+                for k in [k for k, v in _hits.items() if now - v[0] >= RATE_WINDOW]:
+                    del _hits[k]
+            win = _hits[ip]
+            if now - win[0] >= RATE_WINDOW:
+                win[0], win[1] = now, 0
+            win[1] += 1
+            over = win[1] > RATE_LIMIT
+            retry = max(int(RATE_WINDOW - (now - win[0])), 1)
+        if over:
+            resp = JSONResponse(
+                {"error": f"rate limit {RATE_LIMIT} requests per {RATE_WINDOW}s exceeded"},
+                status_code=429, headers={"Retry-After": str(retry)})
+            return await resp(scope, receive, send)
+        return await self.app(scope, receive, send)
+
+
 if __name__ == "__main__":
     if FORCE:
         refresh()
@@ -406,6 +524,9 @@ if __name__ == "__main__":
     elif "--export" in sys.argv:
         export_batch()
     elif "--http" in sys.argv:
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=8722)
+        import uvicorn
+        app = mcp.streamable_http_app(host="0.0.0.0")
+        app.add_middleware(RateLimitMiddleware)  # always on — see abuse protection
+        uvicorn.run(app, host="0.0.0.0", port=8722)
     else:
         mcp.run()

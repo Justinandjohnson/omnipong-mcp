@@ -47,15 +47,21 @@ Point your external scheduler at `uv run server.py --refresh` once a day. After 
 `refresh.log` for `NEW [...]` lines. A flood of "new" events means the baseline was reset without a
 full seed run — see trap #1 in the skill.
 
-## Distribution: GitHub, everyone runs their own copy
+## Distribution — see ARCHITECTURE.md (design evolved to hosted "one core, two faces")
 
-No hosted server. Each user clones and runs `server.py` over stdio — their machine, their
-`cache.db`, their IP. That deletes the whole class of problem rather than solving it: no auth to
-build, no rate limits, no stranger's traffic pooling onto one IP and getting omnipong (a small
-volunteer-run site) to block it.
+The original design was "everyone clones and runs their own copy over stdio." The current
+direction is a single hosted server exposing the same core two ways — an MCP face (Streamable
+HTTP, for agents) and a REST/JSON face (for web apps like rubberr). Full rationale, distribution
+plan (official MCP Registry), and what's ruled out is in **ARCHITECTURE.md**.
 
-`--http` stays for serving your own agents on your own LAN. It binds `0.0.0.0:8722` with no auth,
-so it must not go on the public internet as-is.
+The old IP-pooling caution (many users' traffic on one IP getting a small volunteer site to block
+it) is resolved by the cache: the 15-min TTL + daily snapshot mean the hosted server scrapes
+omnipong at most once per URL per window no matter how many clients hit the faces — gentler on
+omnipong than N separate scrapers, not harsher.
+
+`--http` now ships abuse protection: a per-IP fixed-window rate limit (`OMNIPONG_RATE_LIMIT`,
+default 60 / `OMNIPONG_RATE_WINDOW`, default 60s), always on, covering both faces. It still binds
+`0.0.0.0:8722`; before a public deploy, put it behind TLS and fill the real host into `server.json`.
 
 ## Possible follow-ups (none started, none required)
 
@@ -66,8 +72,11 @@ so it must not go on the public internet as-is.
 
 | Path | What it is |
 |------|-----------|
-| `./server.py` | The MCP server. All 4 tools, scraper, refresh + export + new-event detection. |
+| `./server.py` | The MCP server. All 5 tools, scraper, refresh + export + new-event detection, plus the REST face and per-IP rate limit under `--http`. |
+| `./ARCHITECTURE.md` | The hosted "one core, two faces" design, distribution plan, and what's ruled out. |
+| `./server.json` + `./PUBLISH.md` | Official MCP Registry entry (remote streamable-http) and the publish steps. |
 | `./test_smoke.py` | Real smoke test — spawns the server over stdio, hits the live site, asserts completeness. `uv run test_smoke.py` |
+| `./eval_harness.py` | Real eval of the two **hosted** faces — starts `server.py --http`, hits every REST endpoint + the MCP-over-HTTP client, checks both faces agree (one core), adversarial inputs, concurrency, and the rate-limit 429 boundary. Live site, no mocks. Last run 28/28. `uv run eval_harness.py` |
 | `./README.md` | Tool table, install commands, refresh cadence and the evidence for it. |
 | `./HANDOFF.md` | This file. |
 | `./cache.db` | SQLite: cached raw HTML (15-min TTL) + `seen` table = the first-seen index behind `whats_new`. |

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Justinandjohnson/omnipong",
+  "description": "Serves omnipong.com table-tennis tournament data (signup-able events, results, and entry info) to agents. No player data.",
+  "title": "Omnipong",
+  "repository": {
+    "url": "https://github.com/Justinandjohnson/omnipong-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://REPLACE-WITH-DEPLOY-HOST/mcp"
+    }
+  ]
+}

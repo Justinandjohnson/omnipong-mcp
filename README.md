@@ -51,11 +51,20 @@ First run seeds a baseline silently and flags nothing. Every run after prints `N
 
 Takes ~13 min for 238 pages. Exits non-zero on failure.
 
-## Everyone runs their own copy
+## Two ways to run it
 
-There's no shared public server on purpose. Each install caches to its own `cache.db` and hits omnipong from its own machine — nobody's traffic pools onto one IP and gets that small volunteer-run site blocked.
+**Local (stdio):** clone and run over stdio — your machine, your `cache.db`. Simplest for one person.
 
-`server.py --http` exists for serving your own agents on your own network. It has no auth and binds `0.0.0.0:8722` — don't put it on the public internet.
+**Hosted (`--http`, two faces):** one server, same data, two doors — an **MCP face** at `/mcp` (Streamable HTTP, for agents) and a plain-JSON **REST face** for web apps:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /events?event_type=tournaments\|leagues\|camps\|international&state=&keyword=&year=` | array of events |
+| `GET /whats-new?days=7&open_only=true&state=&event_type=` | events first seen in the last N days |
+| `GET /results/{id}` · `GET /info/{id}` | one tournament's results / entry info |
+| `GET /health` | parser-health check (`200` ok, `503` drifted) |
+
+Abuse protection is always on: a per-IP rate limit (`OMNIPONG_RATE_LIMIT`, default 60 / `OMNIPONG_RATE_WINDOW`, default 60s). The cache means the hosted server scrapes omnipong at most once per URL per 15 min regardless of client count — gentler on that small volunteer-run site than many separate scrapers. Put TLS in front before exposing it publicly. See `ARCHITECTURE.md`.
 
 ## Be polite
 
@@ -64,13 +73,18 @@ Cache is 15 min; refresh sleeps 0.2s between pages. Don't parallelize this. Omni
 ## Test
 
 ```bash
-uv run test_smoke.py         # happy path: all four tools against the live site
+uv run test_smoke.py         # happy path: all five tools over a real stdio MCP client
+uv run eval_harness.py       # the HOSTED faces: REST + MCP-over-HTTP, one-core check, rate limit
 uv run test_adversarial.py server.py   # hostile input, injection, concurrency
 uv run audit.py              # are the selectors still reading the site correctly?
 uv run test_audit.py         # does the audit actually catch a broken parser?
 ```
 
 Real MCP client, real stdio, live site, no mocks. The smoke test asserts completeness (45 CA tournaments, 74 leagues, 12 camps, 148 national rows across 24 sections, known-good results for id 1277). The adversarial suite covers garbage enums, junk and out-of-range IDs, SQL-injection payloads, 5k-char unicode, path traversal, absurd day counts, and 8 concurrent callers — and asserts errors are *actionable*, not leaked tracebacks.
+
+**`eval_harness.py` proves the two hosted faces** (what `--http` adds) end to end against the live site, starting a real `server.py --http` subprocess and hitting it over real sockets: every REST endpoint with real-data assertions; the MCP face over a real Streamable-HTTP client (`initialize` → `list_tools` = the 5 tools, no `get_players`); a **one-core** check that REST `/events` and the MCP `list_tournaments` tool return *identical* ids for the same query; the adversarial set above; 8 concurrent callers returning identical results; and a fresh server at `LIMIT=5` proving exactly 5 requests pass then the 6th is `429` with a valid `Retry-After`. Last run: **28/28** checks passed.
+
+**Known boundary — trust ids from the listing.** omnipong's info endpoint never 404s: given a nonexistent tournament id it returns a *plausible but wrong* real tournament (verified — different bogus ids return different arbitrary tournaments). `get_results` on a bad id is safe (empty `tables`), but `get_tournament_info` will hand back a confident wrong answer. Always pass ids obtained from `list_tournaments` / `whats_new` (which is how agents and the tests use it). This is the site's behavior, not a parser fault, and there is no reliable signal to detect it — so, per the no-fallbacks rule, no double-scrape guard is added.
 
 ## When omnipong changes its HTML
 
